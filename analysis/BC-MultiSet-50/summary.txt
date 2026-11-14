@@ -1,0 +1,19 @@
+Images: 5591 readable, 0 unreadable
+Sizes (HxW): {(256, 256): 5591}
+Channels: {3: 5591}
+Dtypes: {'uint8': 5591}
+
+Sharpness (Laplacian var): min=3.5 p5=52.6 p25=78.6 med=105.5 p75=147.7 p95=246.6 max=916.7
+Background fraction:       min=0.0 p5=0.1 p25=0.8 med=2.7 p75=7.2 p95=24.7 max=100.0 (%)
+Mean saturation:           min=4.9 p5=40.5 p25=52.2 med=57.6 p75=62.5 p95=68.9 max=76.6
+
+Blurry (sharpness <= p5 = 52.6): 280
+Mostly background (bg_frac >= 0.5): 92
+Exact duplicates (md5): 0 groups
+Near duplicates (dHash dist <= 2): 0 pairs
+
+Per group:
+  fold1/images: n=1500  sharp_med=111.5  bg_med=0.034  meanRGB=(194,153,173)
+  fold2/images: n=1386  sharp_med=101.5  bg_med=0.021  meanRGB=(190,147,168)
+  fold3/images: n=1554  sharp_med=104.6  bg_med=0.024  meanRGB=(195,154,173)
+  fold4/images: n=1151  sharp_med=107.8  bg_med=0.035  meanRGB=(194,154,173)
