@@ -3,6 +3,7 @@ import math
 import random
 import re
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import cv2
 import numpy as np
@@ -249,26 +250,57 @@ def write_train_meta_info(kept, train_folds, out_dir):
 def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degrade):
     candidates = kept[kept["fold"] == val_fold]
     val = candidates.sample(n=min(n_val, len(candidates)), random_state=seed)
+    names = set(val["name"])
+    if len(names) != len(val):
+        duplicates = val.loc[val["name"].duplicated(), "name"].tolist()
+        raise ValueError(f"Повторяющиеся имена файлов в {val_fold}: {duplicates}")
 
     scale = degrade.opt["scale"] if degrade else LR_SCALE
-    hr_dir = empty_dir(out_dir / "val_hr")
-    lr_dir = empty_dir(out_dir / "val_lr")
-    degraded_dir = empty_dir(out_dir / "val_lr_degraded") if degrade else None
+    folders = ["val_hr", "val_lr"]
+    if degrade:
+        folders.append("val_lr_degraded")
 
-    for index, (_, patch) in enumerate(val.iterrows()):
-        hr = cv2.imread(patch["path"])
-        cv2.imwrite(str(hr_dir / patch["name"]), hr)
-        cv2.imwrite(str(lr_dir / patch["name"]), downscale(hr, scale))
-        if degrade:
-            cv2.imwrite(str(degraded_dir / patch["name"]), degrade(hr, seed + index))
+    for folder in folders:
+        target = out_dir / folder
+        if target.is_dir():
+            extra = sorted(p.name for p in target.iterdir()
+                           if p.is_file() and not p.name.startswith(".") and p.suffix != ".png")
+            if extra:
+                raise ValueError(f"Посторонние файлы в {target}: {extra}")
+        elif target.exists():
+            raise NotADirectoryError(target)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".val-", dir=out_dir) as staging:
+        staged = Path(staging)
+        for folder in folders:
+            (staged / folder).mkdir()
+
+        for index, (_, patch) in enumerate(val.iterrows()):
+            try:
+                hr = cv2.imread(patch["path"])
+                if hr is None:
+                    raise OSError("OpenCV не смог прочитать HR")
+                images = [hr, downscale(hr, scale)]
+                if degrade:
+                    images.append(degrade(hr, seed + index))
+                for folder, image in zip(folders, images):
+                    path = staged / folder / patch["name"]
+                    if not cv2.imwrite(str(path), image):
+                        raise OSError(f"OpenCV не смог записать {folder}/{path.name}")
+            except Exception as exc:
+                raise RuntimeError(f"Ошибка подготовки валидации для {patch['path']}: {exc}") from exc
+
+        # Keep the previous validation set if image generation fails.
+        for folder in folders:
+            target = out_dir / folder
+            target.mkdir(exist_ok=True)
+            for path in (staged / folder).iterdir():
+                path.replace(target / path.name)
+            for path in target.glob("*.png"):
+                if path.name not in names:
+                    path.unlink()
     return val
-
-
-def empty_dir(path):
-    path.mkdir(parents=True, exist_ok=True)
-    for old_file in path.glob("*.png"):
-        old_file.unlink()
-    return path
 
 
 def downscale(image, scale=LR_SCALE):
