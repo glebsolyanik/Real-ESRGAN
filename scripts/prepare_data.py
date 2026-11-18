@@ -250,8 +250,9 @@ def write_train_meta_info(kept, train_folds, out_dir):
 def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degrade):
     candidates = kept[kept["fold"] == val_fold]
     val = candidates.sample(n=min(n_val, len(candidates)), random_state=seed)
+    total = len(val)
     names = set(val["name"])
-    if len(names) != len(val):
+    if len(names) != total:
         duplicates = val.loc[val["name"].duplicated(), "name"].tolist()
         raise ValueError(f"Повторяющиеся имена файлов в {val_fold}: {duplicates}")
 
@@ -276,6 +277,7 @@ def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degrade):
         for folder in folders:
             (staged / folder).mkdir()
 
+        print(f"Валидация {scale}x: 0/{total} патчей", flush=True)
         for index, (_, patch) in enumerate(val.iterrows()):
             try:
                 hr = cv2.imread(patch["path"])
@@ -290,6 +292,10 @@ def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degrade):
                         raise OSError(f"OpenCV не смог записать {folder}/{path.name}")
             except Exception as exc:
                 raise RuntimeError(f"Ошибка подготовки валидации для {patch['path']}: {exc}") from exc
+
+            done = index + 1
+            if done == 1 or done % 10 == 0 or done == total:
+                print(f"Валидация {scale}x: {done}/{total} патчей", flush=True)
 
         # Keep the previous validation set if image generation fails.
         for folder in folders:
@@ -322,12 +328,14 @@ class TrainingDegradation:
         import yaml
         from basicsr.utils import DiffJPEG, USMSharp
 
+        # Small patches processed one at a time do not benefit from a large CPU thread pool.
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
         config = yaml.safe_load(Path(opt_path).read_text())
         self.opt = {**config, **config["datasets"]["train"]}
         self.torch = torch
         self.jpeger = DiffJPEG(differentiable=False)
         self.usm_sharpener = USMSharp()
-        print(f"val_lr_degraded: параметры деградаций из {opt_path}")
+        print(f"val_lr_degraded: параметры из {opt_path}, потоков PyTorch: {torch.get_num_threads()}", flush=True)
 
     def __call__(self, hr_bgr, seed):
         import torch
