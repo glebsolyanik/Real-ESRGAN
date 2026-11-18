@@ -10,6 +10,7 @@ import pandas as pd
 
 PATCH_NAME = re.compile(r"^(\d+)_Crop_(\d+)_y(\d+)_x(\d+)")
 LR_SCALE = 4
+DEFAULT_OUT = "datasets/BC-MultiSet-50_SR"
 SHEET_COLUMNS = 8
 SHEET_TILE = 192
 SHEET_MAX_IMAGES = 48
@@ -17,7 +18,10 @@ SHEET_MAX_IMAGES = 48
 
 def main():
     args = parse_args()
-    out_dir = Path(args.out)
+    degrade = TrainingDegradation(args.degradation_opt) if args.degradation_opt else None
+    scale = degrade.opt["scale"] if degrade else LR_SCALE
+    default_out = DEFAULT_OUT if scale == LR_SCALE else f"{DEFAULT_OUT}_x{scale}"
+    out_dir = Path(default_out if args.out is None else args.out)
     report_dir = out_dir / "report"
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -36,7 +40,7 @@ def main():
 
     kept = patches[patches["reason"] == ""]
     train = write_train_meta_info(kept, args.train_folds.split(","), out_dir)
-    val = write_val_pairs(kept, args.val_fold, args.n_val, args.seed, out_dir, args.degradation_opt)
+    val = write_val_pairs(kept, args.val_fold, args.n_val, args.seed, out_dir, degrade)
     val[["name", "fold", "slide"]].to_csv(report_dir / "val_list.csv", index=False)
 
     print("\n=== ГОТОВО ===")
@@ -50,7 +54,7 @@ def main():
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default="datasets/BC-MultiSet-50")
-    parser.add_argument("--out", default="datasets/BC-MultiSet-50_SR")
+    parser.add_argument("--out", help="Каталог результата. По умолчанию зависит от масштаба в конфиге.")
     parser.add_argument("--train_folds", default="fold1,fold2,fold3")
     parser.add_argument("--val_fold", default="fold4")
     parser.add_argument("--n_val", type=int, default=100)
@@ -242,19 +246,19 @@ def write_train_meta_info(kept, train_folds, out_dir):
     return train
 
 
-def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degradation_opt):
+def write_val_pairs(kept, val_fold, n_val, seed, out_dir, degrade):
     candidates = kept[kept["fold"] == val_fold]
     val = candidates.sample(n=min(n_val, len(candidates)), random_state=seed)
 
+    scale = degrade.opt["scale"] if degrade else LR_SCALE
     hr_dir = empty_dir(out_dir / "val_hr")
     lr_dir = empty_dir(out_dir / "val_lr")
-    degrade = TrainingDegradation(degradation_opt) if degradation_opt else None
     degraded_dir = empty_dir(out_dir / "val_lr_degraded") if degrade else None
 
     for index, (_, patch) in enumerate(val.iterrows()):
         hr = cv2.imread(patch["path"])
         cv2.imwrite(str(hr_dir / patch["name"]), hr)
-        cv2.imwrite(str(lr_dir / patch["name"]), downscale(hr))
+        cv2.imwrite(str(lr_dir / patch["name"]), downscale(hr, scale))
         if degrade:
             cv2.imwrite(str(degraded_dir / patch["name"]), degrade(hr, seed + index))
     return val
@@ -267,9 +271,9 @@ def empty_dir(path):
     return path
 
 
-def downscale(image):
+def downscale(image, scale=LR_SCALE):
     height, width = image.shape[:2]
-    return cv2.resize(image, (width // LR_SCALE, height // LR_SCALE), interpolation=cv2.INTER_CUBIC)
+    return cv2.resize(image, (width // scale, height // scale), interpolation=cv2.INTER_CUBIC)
 
 
 class TrainingDegradation:
